@@ -22,4 +22,4 @@ export function getGeminiClient(): GoogleGenAI {
  * Defaults to gemini-2.0-flash if GEMINI_MODEL is not set.
  */
 export const GEMINI_MODEL =
-  process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
+  process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest";

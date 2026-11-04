@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import type { RecogLang } from "@/lib/speech-types";
+import type { Parsed } from "@/lib/schema";
 import Link from "next/link";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,6 @@ function MicButton({
       aria-label={label[status]}
       className={`${base} ${colours[status]} disabled:opacity-40 disabled:cursor-not-allowed`}
     >
-      {/* Mic SVG icon */}
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 24 24"
@@ -80,10 +80,8 @@ function MicButton({
         aria-hidden="true"
       >
         {status === "listening" ? (
-          /* square = stop */
           <rect x="6" y="6" width="12" height="12" rx="2" />
         ) : (
-          /* mic */
           <>
             <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
             <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z" />
@@ -95,34 +93,92 @@ function MicButton({
 }
 
 // ---------------------------------------------------------------------------
+// Spinner
+// ---------------------------------------------------------------------------
+
+function Spinner() {
+  return (
+    <div
+      role="status"
+      aria-label="Processing…"
+      className="w-6 h-6 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin"
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // VoiceCapture
 // ---------------------------------------------------------------------------
 
 /**
  * Props:
- *   onTranscript – called with every final transcript, from mic or typed input.
- *                  Defaults to console.log + local "Last command" state.
- *                  Phase 2 will pass its own handler (e.g. POST to /api/process).
+ *   onTranscript – optional external handler called with the raw transcript.
+ *                  Phase 3 (ledger) will pass a handler here if needed;
+ *                  today VoiceCapture handles everything internally.
  */
 export interface VoiceCaptureProps {
   onTranscript?: (text: string) => void;
 }
+
+type ProcessState = "idle" | "loading" | "done" | "error";
 
 export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
   const [lang, setLang] = useState<RecogLang>("hi-IN");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [typedText, setTypedText] = useState("");
 
+  // ── Phase 2: AI processing state ──────────────────────────────────
+  const [processState, setProcessState] = useState<ProcessState>("idle");
+  const [parsedResult, setParsedResult] = useState<Parsed | null>(null);
+  const [processError, setProcessError] = useState<string | null>(null);
+
   // ------------------------------------------------------------------
-  // onTranscript handler (Phase 2 hook point)
+  // POST to /api/process — the Phase 2 hook point
+  // ------------------------------------------------------------------
+  const sendToProcess = useCallback(
+    async (text: string) => {
+      setProcessState("loading");
+      setParsedResult(null);
+      setProcessError(null);
+
+      try {
+        const res = await fetch("/api/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript: text }),
+        });
+        const data = (await res.json()) as
+          | { ok: true; parsed: Parsed }
+          | { ok: false; error: string };
+
+        if (data.ok) {
+          setParsedResult(data.parsed);
+          setProcessState("done");
+        } else {
+          setProcessError(data.error);
+          setProcessState("error");
+        }
+      } catch (err) {
+        setProcessError(
+          err instanceof Error ? err.message : "Network error. Please try again."
+        );
+        setProcessState("error");
+      }
+    },
+    []
+  );
+
+  // ------------------------------------------------------------------
+  // Transcript handler: update UI + call API + notify parent
   // ------------------------------------------------------------------
   const handleTranscript = useCallback(
     (text: string) => {
       console.log("[VoiceKhata] transcript:", text);
       setLastCommand(text);
       onTranscript?.(text);
+      sendToProcess(text);
     },
-    [onTranscript]
+    [onTranscript, sendToProcess]
   );
 
   // ------------------------------------------------------------------
@@ -154,7 +210,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
   };
 
   // ------------------------------------------------------------------
-  // Transcript display: show interim while listening, else last command
+  // Transcript display
   // ------------------------------------------------------------------
   const displayText = interimText || lastCommand || "";
   const isInterim = Boolean(interimText);
@@ -197,7 +253,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           disabled={!isSupported}
         />
 
-        {/* Error / status message */}
+        {/* Error / status messages */}
         {(!isSupported || status === "error") && (
           <p className="text-center text-base font-medium text-orange-600 max-w-xs">
             {errorMessage(errorCode, isSupported)}
@@ -247,7 +303,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
             />
             <button
               onClick={handleSend}
-              disabled={!typedText.trim()}
+              disabled={!typedText.trim() || processState === "loading"}
               aria-label="Send typed command"
               className="px-5 py-3 bg-blue-600 text-white rounded-xl font-semibold
                          hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed
@@ -268,6 +324,45 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
               {lastCommand}
             </p>
           </div>
+        )}
+
+        {/* ── Phase 2: Processing indicator ───────────────────── */}
+        {processState === "loading" && (
+          <div className="flex items-center gap-3 text-sm text-blue-600">
+            <Spinner />
+            <span>Processing with Gemini…</span>
+          </div>
+        )}
+
+        {processState === "error" && processError && (
+          <p className="text-sm text-orange-600 font-medium text-center">
+            ⚠️ {processError}
+          </p>
+        )}
+
+        {/* ── Phase 2: Debug — parsed result ──────────────────── */}
+        {processState === "done" && parsedResult && (
+          <details className="w-full border border-gray-200 rounded-2xl overflow-hidden">
+            <summary className="px-4 py-3 text-sm font-semibold text-gray-600 cursor-pointer hover:bg-gray-50 select-none">
+              🔍 Debug: parsed result{" "}
+              <span
+                className={`ml-2 text-xs font-bold px-2 py-0.5 rounded-full ${
+                  parsedResult.intent === "entries"
+                    ? "bg-green-100 text-green-700"
+                    : parsedResult.intent === "query"
+                    ? "bg-blue-100 text-blue-700"
+                    : parsedResult.intent === "undo"
+                    ? "bg-yellow-100 text-yellow-700"
+                    : "bg-gray-100 text-gray-500"
+                }`}
+              >
+                {parsedResult.intent}
+              </span>
+            </summary>
+            <pre className="px-4 py-3 text-xs text-gray-700 bg-gray-50 overflow-x-auto leading-relaxed whitespace-pre-wrap">
+              {JSON.stringify(parsedResult, null, 2)}
+            </pre>
+          </details>
         )}
       </div>
 
