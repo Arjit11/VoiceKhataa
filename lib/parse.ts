@@ -117,8 +117,21 @@ sau=100, dhai sau=250, paanch sau=500, ek hazaar=1000, etc.
 Compound: "teen sau pachaas" = 350, "do hazaar paanch sau" = 2500.
 
 ## Customer names
-- Keep in Roman script with honourifics ("Sharma ji", "Gurpreet", "Verma ji").
-- Capitalise first letter of each word.
+- Always output names in Roman/Latin script (e.g. "Sharma ji", "Gurpreet", "Verma ji").
+- If the input is in Devanagari (Hindi script), transliterate the name to Roman script.
+- Capitalise the first letter of each word.
+- Preserve honourifics: ji, bhai, bhaiya, didi, sahib.
+
+## Script handling
+- Input may be in Devanagari (Hindi script), Roman Hinglish, or a mix.
+- Devanagari examples: शर्मा जी = "Sharma ji", गुरप्रीत = "Gurpreet", वर्मा जी = "Verma ji",
+  रमेश = "Ramesh", सुनीता देवी = "Sunita Devi".
+- Devanagari digits: ५ = 5, ५०० = 500, ४०० = 400, १००० = 1000.
+- Always output customer names in Roman script regardless of input script.
+
+## Sale with partial payment
+- "X ne Y ka saman liya aur Z diye" → kind:"sale", total:Y, paid:Z.
+- "X ne Y rupay ka saman kharida aur Z diye" (Devanagari or Roman) → same pattern.
 
 ## Important
 - Do NOT invent data not present in the transcript.
