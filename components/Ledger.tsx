@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { supabaseClient, type CustomerBalance, type Transaction } from "@/lib/supabaseClient";
 
 // ---------------------------------------------------------------------------
@@ -234,10 +234,9 @@ export default function Ledger() {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <>
+              <Fragment key={row.id}>
                 {/* Customer row */}
                 <tr
-                  key={row.id}
                   onClick={() => toggleRow(row.id)}
                   className={`border-b border-gray-100 cursor-pointer transition-colors duration-300 ${
                     flashIds.has(row.id)
@@ -277,7 +276,7 @@ export default function Ledger() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>

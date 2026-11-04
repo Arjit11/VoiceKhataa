@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import type { RecogLang } from "@/lib/speech-types";
 import type { Parsed } from "@/lib/schema";
@@ -101,6 +101,10 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
   const [lang, setLang] = useState<RecogLang>("hi-IN");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [typedText, setTypedText] = useState("");
+
+  // Suppress hydration mismatch: Speech API is unknown during SSR
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Phase 2: AI processing
   const [processState, setProcessState] = useState<ProcessState>("idle");
@@ -271,17 +275,17 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           ))}
         </select>
 
-        {/* Mic button */}
-        <MicButton status={isSupported ? status : "error"} onClick={toggleMic}
-          disabled={!isSupported} />
+        {/* Mic button — use "idle" on server to avoid hydration mismatch */}
+        <MicButton status={mounted ? (isSupported ? status : "error") : "idle"} onClick={toggleMic}
+          disabled={mounted && !isSupported} />
 
-        {/* Error / status messages */}
-        {(!isSupported || status === "error") && (
+        {/* Error / status messages — only show after mount */}
+        {mounted && (!isSupported || status === "error") && (
           <p className="text-center text-base font-medium text-orange-600 max-w-xs">
             {errorMessage(errorCode, isSupported)}
           </p>
         )}
-        {status === "listening" && !errorCode && (
+        {mounted && status === "listening" && !errorCode && (
           <p className="text-sm text-red-500 font-medium animate-pulse">🎙️ Listening…</p>
         )}
 
