@@ -154,6 +154,46 @@ Speak (or type) any of these:
 
 ---
 
+## What is real and what is mocked
+
+### ✅ Real (live, not faked)
+
+| Feature | Detail |
+|---|---|
+| **Speech recognition** | Web Speech API in Chrome — actual audio captured from mic |
+| **Gemini AI parsing** | Live call to `gemini-flash-lite-latest`; extracts customer names, amounts, intent |
+| **Supabase storage** | Transactions and customer balances written to a real Postgres database |
+| **Live ledger** | Supabase Realtime subscription — ledger updates without page refresh |
+| **Fuzzy name matching** | `pg_trgm` trigram similarity via `match_customers` RPC in Postgres |
+| **Spoken replies** | Web Speech Synthesis API — actual TTS audio output |
+| **WhatsApp link generation** | `wa.me` deep-link with URI-encoded Hindi message, real phone number |
+
+### ⚠️ Limited or by design
+
+| Item | Reality |
+|---|---|
+| **WhatsApp message** | Opens a pre-filled chat — the shopkeeper still taps **Send** manually; there is no server-side WhatsApp API |
+| **Sample customers** | Seeded demo data (Sharma ji, Gurpreet, Verma ji, Ramesh, Sunita Devi) with fake phone numbers |
+| **No login / multi-shop** | Single shop only; no authentication — suitable for a solo demo, not production multi-tenant |
+| **Speech quality** | Depends on Chrome's on-device speech engine and the microphone; works best on Android Chrome or desktop Chrome |
+| **Rate limit** | In-memory sliding window — resets on cold start; not suitable for high-traffic production |
+
+---
+
+## Demo Reset
+
+To reset demo data before a presentation, open `?admin=1` on the app URL. A **Reset Demo** button will appear. Clicking it and confirming calls `POST /api/demo/reset` using the `DEMO_RESET_TOKEN` env var.
+
+Add to `.env.local`:
+```env
+DEMO_RESET_TOKEN=your-long-random-secret
+```
+Add the same value in Vercel dashboard → Environment Variables.
+
+See [`docs/DEMO.md`](docs/DEMO.md) for the full 3-minute demo script, 10 test sentences, and pre-demo checklist.
+
+---
+
 ## License
 
 MIT
