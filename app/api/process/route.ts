@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseTranscript } from "@/lib/parse";
+import { applyEntries } from "@/lib/ledger";
 
 const MAX_LENGTH = 500;
 
@@ -42,15 +43,34 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Call Gemini ────────────────────────────────────────────────────
+  const text = transcript.trim();
+
+  // ── Gemini extraction ──────────────────────────────────────────────
+  let parsed;
   try {
-    const parsed = await parseTranscript(transcript.trim());
-    return NextResponse.json({ ok: true, parsed }, { status: 200 });
+    parsed = await parseTranscript(text);
   } catch (err) {
-    console.error("[/api/process] error:", err);
+    console.error("[/api/process] parse error:", err);
     return NextResponse.json(
       { ok: false, error: "Could not process transcript. Please try again." },
       { status: 500 }
     );
   }
+
+  // ── Ledger write (entries intent only) ────────────────────────────
+  if (parsed.intent === "entries" && parsed.entries.length > 0) {
+    try {
+      const results = await applyEntries(parsed.entries, text);
+      return NextResponse.json({ ok: true, parsed, results }, { status: 200 });
+    } catch (err) {
+      console.error("[/api/process] ledger error:", err);
+      return NextResponse.json(
+        { ok: false, error: "Transcript parsed but could not write to ledger." },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ── Other intents — return parsed only ────────────────────────────
+  return NextResponse.json({ ok: true, parsed }, { status: 200 });
 }
