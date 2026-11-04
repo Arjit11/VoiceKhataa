@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import type { RecogLang } from "@/lib/speech-types";
 import type { Parsed } from "@/lib/schema";
@@ -34,34 +35,44 @@ function errorMessage(code: string | null, isSupported: boolean): string {
 // Mic button
 // ---------------------------------------------------------------------------
 
-type MicStatus = "idle" | "listening" | "error";
+type MicStatus = "idle" | "listening" | "speaking" | "error";
 
 function MicButton({ status, onClick, disabled }: {
   status: MicStatus; onClick: () => void; disabled: boolean;
 }) {
-  const base = "w-32 h-32 rounded-full flex items-center justify-center shadow-lg transition-colors duration-200 focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2";
+  const base = "w-32 h-32 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 focus:outline-none focus-visible:ring-4 focus-visible:ring-offset-2";
   const colours: Record<MicStatus, string> = {
     idle:      "bg-blue-600 hover:bg-blue-700 focus-visible:ring-blue-400",
     listening: "bg-red-500 hover:bg-red-600 focus-visible:ring-red-400 animate-pulse",
+    speaking:  "bg-indigo-400 cursor-not-allowed focus-visible:ring-indigo-300",
     error:     "bg-orange-500 hover:bg-orange-600 focus-visible:ring-orange-400",
   };
   const label: Record<MicStatus, string> = {
-    idle: "Start recording", listening: "Stop recording", error: "Try again",
+    idle:      "Start recording",
+    listening: "Stop recording",
+    speaking:  "Speaking…",
+    error:     "Try again",
   };
   return (
-    <button onClick={onClick} disabled={disabled} aria-label={label[status]}
+    <button onClick={onClick} disabled={disabled || status === "speaking"}
+      aria-label={label[status]}
       className={`${base} ${colours[status]} disabled:opacity-40 disabled:cursor-not-allowed`}>
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"
-        className="w-14 h-14" aria-hidden="true">
-        {status === "listening" ? (
-          <rect x="6" y="6" width="12" height="12" rx="2" />
-        ) : (
-          <>
-            <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
-            <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z" />
-          </>
-        )}
-      </svg>
+      {status === "speaking" ? (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" className="w-14 h-14" aria-hidden="true">
+          <path d="M18 9v3m-3-6v9m-3-5v3M3 12h2m14 0h2M5.636 5.636l1.414 1.414M16.95 5.636l-1.414 1.414M5.636 18.364l1.414-1.414M16.95 18.364l-1.414-1.414" stroke="white" strokeWidth="2" strokeLinecap="round" fill="none"/>
+        </svg>
+      ) : (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" className="w-14 h-14" aria-hidden="true">
+          {status === "listening" ? (
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          ) : (
+            <>
+              <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z" />
+              <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z" />
+            </>
+          )}
+        </svg>
+      )}
     </button>
   );
 }
@@ -78,7 +89,7 @@ function Spinner() {
 }
 
 // ---------------------------------------------------------------------------
-// API response types (all paths now include reply)
+// API response types
 // ---------------------------------------------------------------------------
 
 type ProcessResponse =
@@ -99,6 +110,9 @@ export interface VoiceCaptureProps {
 type ProcessState = "idle" | "loading" | "done" | "error";
 
 export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
+  const searchParams = useSearchParams();
+  const debugMode = searchParams.get("debug") === "1";
+
   const [lang, setLang] = useState<RecogLang>("hi-IN");
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [typedText, setTypedText] = useState("");
@@ -107,27 +121,38 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Phase 2: AI processing
+  // Offline banner
+  const [isOffline, setIsOffline] = useState(false);
+  useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline  = () => setIsOffline(false);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online",  goOnline);
+    return () => {
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online",  goOnline);
+    };
+  }, []);
+
+  // AI processing
   const [processState, setProcessState] = useState<ProcessState>("idle");
   const [parsedResult, setParsedResult] = useState<Parsed | null>(null);
   const [processError, setProcessError] = useState<string | null>(null);
 
-  // Phase 4: clarification
+  // Clarification
   const [clarifyQuestion, setClarifyQuestion] = useState<string | null>(null);
   const [clarifyOptions, setClarifyOptions] = useState<string[]>([]);
   const [pendingState, setPendingState] = useState<PendingState | null>(null);
   const clarifyMissCount = useRef(0);
 
-  // Phase 5: spoken replies
+  // Spoken replies
   const [replyText, setReplyText] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
-  // Show undo button after a successful entries write
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [undoLoading, setUndoLoading] = useState(false);
 
-  // ------------------------------------------------------------------
-  // Reset clarification state
-  // ------------------------------------------------------------------
+  // ── Reset clarification ─────────────────────────────────────────────
   const clearClarify = useCallback(() => {
     setClarifyQuestion(null);
     setClarifyOptions([]);
@@ -135,28 +160,24 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
     clarifyMissCount.current = 0;
   }, []);
 
-  // ------------------------------------------------------------------
-  // Speak a reply (echo prevention: stop mic first)
-  // ------------------------------------------------------------------
-  // We need stop() from the hook, so we wire it up after the hook call below.
-  // Use a ref so speakReply doesn't depend on stop directly.
+  // ── speak() with isSpeaking guard ──────────────────────────────────
   const stopRef = useRef<(() => void) | null>(null);
 
   const speakReply = useCallback(async (text: string) => {
     if (muted) return;
-    // Stop mic before speaking so it doesn't hear itself
-    stopRef.current?.();
+    stopRef.current?.();   // stop mic
     cancelSpeech();
+    setIsSpeaking(true);
     try {
       await speak(text);
     } catch {
-      // Speech synthesis errors are non-fatal — ignore silently
+      // non-fatal
+    } finally {
+      setIsSpeaking(false);
     }
   }, [muted]);
 
-  // ------------------------------------------------------------------
-  // POST to /api/process (supports both normal and pending paths)
-  // ------------------------------------------------------------------
+  // ── POST to /api/process ────────────────────────────────────────────
   const sendToProcess = useCallback(
     async (text: string, pending?: PendingState) => {
       setProcessState("loading");
@@ -178,11 +199,9 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
         });
         const data = (await res.json()) as ProcessResponse;
 
-        // Always surface the reply text
         const reply = data.reply ?? null;
         if (reply) setReplyText(reply);
 
-        // Cancelled clarification
         if ("cancelled" in data && data.cancelled) {
           clearClarify();
           setProcessError("Could not identify the customer. Command cancelled.");
@@ -199,7 +218,6 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           return;
         }
 
-        // Clarification needed
         if ("clarify" in data && data.clarify) {
           setClarifyQuestion(data.clarify.question);
           setClarifyOptions(data.clarify.options);
@@ -207,12 +225,10 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           clarifyMissCount.current = 0;
           if ("parsed" in data) setParsedResult(data.parsed);
           setProcessState("done");
-          // Speak the clarify question; mic stays idle — user taps to answer
           if (reply) await speakReply(reply);
           return;
         }
 
-        // Resolved after clarification
         if ("resolvedAs" in data) {
           clearClarify();
           setProcessState("done");
@@ -220,9 +236,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           return;
         }
 
-        // Normal success
         if ("parsed" in data) setParsedResult(data.parsed);
-        // Show undo button only after a successful ledger write
         const wasEntry = "parsed" in data &&
           (data as { parsed: { intent: string } }).parsed?.intent === "entries" &&
           !("clarify" in data);
@@ -242,12 +256,9 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
     [clearClarify, speakReply]
   );
 
-  // ------------------------------------------------------------------
-  // Transcript handler
-  // ------------------------------------------------------------------
+  // ── Transcript handler ──────────────────────────────────────────────
   const handleTranscript = useCallback(
     (text: string) => {
-      console.log("[VoiceKhata] transcript:", text);
       setLastCommand(text);
       onTranscript?.(text);
 
@@ -255,8 +266,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
         clarifyMissCount.current += 1;
         if (clarifyMissCount.current > 2) {
           clearClarify();
-          const msg = "Clarification failed too many times. Command cancelled.";
-          setProcessError(msg);
+          setProcessError("Clarification failed. Command cancelled.");
           setProcessState("error");
           speakReply("Theek hai, command cancel kar diya.");
           return;
@@ -269,9 +279,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
     [onTranscript, sendToProcess, pendingState, clearClarify, speakReply]
   );
 
-  // ------------------------------------------------------------------
-  // Undo last entry (Phase 6)
-  // ------------------------------------------------------------------
+  // ── Undo last entry ─────────────────────────────────────────────────
   const handleUndo = useCallback(async () => {
     setUndoLoading(true);
     try {
@@ -294,26 +302,19 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
     }
   }, [speakReply]);
 
-  // ------------------------------------------------------------------
-  // Speech recognition
-  // ------------------------------------------------------------------
+  // ── Speech recognition ──────────────────────────────────────────────
   const { isSupported, status, errorCode, interimText, start, stop } =
     useSpeechRecognition({ lang, onTranscript: handleTranscript });
 
-  // Keep stopRef current so speakReply can call stop() without stale closures
   useEffect(() => { stopRef.current = stop; }, [stop]);
 
   const toggleMic = () => {
+    if (isSpeaking) return;
     if (status === "listening") stop();
-    else {
-      cancelSpeech(); // stop any ongoing TTS before recording
-      start();
-    }
+    else { cancelSpeech(); start(); }
   };
 
-  // ------------------------------------------------------------------
-  // Typed fallback
-  // ------------------------------------------------------------------
+  // ── Typed fallback ──────────────────────────────────────────────────
   const typedInputRef = useRef<HTMLInputElement>(null);
 
   const handleSend = useCallback(() => {
@@ -328,17 +329,28 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
     if (e.key === "Enter") handleSend();
   };
 
-  // ------------------------------------------------------------------
-  // Transcript display
-  // ------------------------------------------------------------------
+  // ── Derived display ─────────────────────────────────────────────────
   const displayText = interimText || lastCommand || "";
-  const isInterim = Boolean(interimText);
+  const isInterim   = Boolean(interimText);
 
-  // ------------------------------------------------------------------
-  // Render
-  // ------------------------------------------------------------------
+  // Mic status for the button
+  const micStatus: MicStatus = isSpeaking
+    ? "speaking"
+    : !mounted || !isSupported
+    ? (mounted ? "error" : "idle")
+    : status;
+
+  // ── Render ──────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen flex flex-col items-center justify-between px-4 py-10 bg-white">
+
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-yellow-400 text-yellow-900 text-sm font-semibold text-center py-2 px-4">
+          📡 No internet connection — commands won&apos;t be processed until you&apos;re back online.
+        </div>
+      )}
+
       <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm gap-6">
 
         {/* Title */}
@@ -349,7 +361,8 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
 
         {/* Language selector */}
         <select value={lang} onChange={(e) => setLang(e.target.value as RecogLang)}
-          disabled={status === "listening"} aria-label="Recognition language"
+          disabled={status === "listening" || isSpeaking}
+          aria-label="Recognition language"
           className="w-full border border-gray-300 rounded-xl px-4 py-3 text-base bg-white
                      focus:outline-none focus:ring-2 focus:ring-blue-400
                      disabled:opacity-50 disabled:cursor-not-allowed">
@@ -359,16 +372,20 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
         </select>
 
         {/* Mic button */}
-        <MicButton status={mounted ? (isSupported ? status : "error") : "idle"}
-          onClick={toggleMic} disabled={mounted && !isSupported} />
+        <MicButton status={micStatus} onClick={toggleMic} disabled={mounted && !isSupported} />
+
+        {/* Speaking label */}
+        {isSpeaking && (
+          <p className="text-sm text-indigo-500 font-medium animate-pulse">🔊 Speaking…</p>
+        )}
 
         {/* Error / status messages */}
-        {mounted && (!isSupported || status === "error") && (
+        {mounted && !isSpeaking && (!isSupported || status === "error") && (
           <p className="text-center text-base font-medium text-orange-600 max-w-xs">
             {errorMessage(errorCode, isSupported)}
           </p>
         )}
-        {mounted && status === "listening" && !errorCode && (
+        {mounted && status === "listening" && !errorCode && !isSpeaking && (
           <p className="text-sm text-red-500 font-medium animate-pulse">🎙️ Listening…</p>
         )}
 
@@ -381,28 +398,21 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           {displayText || <span className="text-gray-400">Your speech will appear here…</span>}
         </div>
 
-        {/* ── Phase 5: Reply banner ──────────────────────────────── */}
+        {/* Reply banner */}
         {replyText && (
           <div className="w-full rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-4"
             aria-live="polite" aria-label="Spoken reply">
-            <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wide mb-2">
-              Reply
-            </p>
-            <p className="text-xl font-medium text-indigo-900 leading-snug mb-3">
-              {replyText}
-            </p>
-            <div className="flex items-center gap-3">
-              {/* Replay button */}
-              <button
-                onClick={() => speakReply(replyText)}
+            <p className="text-xs font-semibold text-indigo-500 uppercase tracking-wide mb-2">Reply</p>
+            <p className="text-xl font-medium text-indigo-900 leading-snug mb-3">{replyText}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => speakReply(replyText)} disabled={isSpeaking}
                 aria-label="Replay spoken reply"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-100
-                           hover:bg-indigo-200 text-indigo-700 text-sm font-medium transition-colors">
+                           hover:bg-indigo-200 text-indigo-700 text-sm font-medium transition-colors
+                           disabled:opacity-40">
                 🔁 Replay
               </button>
-              {/* Mute toggle */}
-              <button
-                onClick={() => setMuted((m) => !m)}
+              <button onClick={() => setMuted((m) => !m)}
                 aria-label={muted ? "Unmute spoken replies" : "Mute spoken replies"}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium
                             transition-colors ${muted
@@ -410,11 +420,8 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
                               : "bg-indigo-100 hover:bg-indigo-200 text-indigo-700"}`}>
                 {muted ? "🔇 Muted" : "🔊 Sound on"}
               </button>
-              {/* Undo button — shown after a successful entries write */}
               {canUndo && (
-                <button
-                  onClick={handleUndo}
-                  disabled={undoLoading}
+                <button onClick={handleUndo} disabled={undoLoading || isSpeaking}
                   aria-label="Undo last entry"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100
                              hover:bg-red-200 text-red-700 text-sm font-medium transition-colors
@@ -426,13 +433,11 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           </div>
         )}
 
-        {/* ── Phase 4: Clarification banner ─────────────────────── */}
+        {/* Clarification banner */}
         {clarifyQuestion && clarifyOptions.length > 0 && (
           <div className="w-full rounded-2xl border border-yellow-300 bg-yellow-50 px-4 py-4"
             role="alert" aria-live="assertive">
-            <p className="text-sm font-semibold text-yellow-800 mb-3">
-              🤔 {clarifyQuestion}
-            </p>
+            <p className="text-sm font-semibold text-yellow-800 mb-3">🤔 {clarifyQuestion}</p>
             <div className="flex flex-wrap gap-2 mb-3">
               {clarifyOptions.map((option) => (
                 <button key={option}
@@ -449,13 +454,14 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
             </div>
             <p className="text-xs text-yellow-600">
               Tap a name above, or speak it. You can also{" "}
-              <button onClick={clearClarify}
-                className="underline font-medium hover:text-yellow-800">cancel</button>.
+              <button onClick={clearClarify} className="underline font-medium hover:text-yellow-800">
+                cancel
+              </button>.
             </p>
           </div>
         )}
 
-        {/* Typed fallback */}
+        {/* Typed fallback — always visible */}
         <div className="w-full">
           <div className="flex items-center gap-1 mb-2">
             <div className="flex-1 h-px bg-gray-200" />
@@ -480,7 +486,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           </div>
         </div>
 
-        {/* Last command box */}
+        {/* Last command */}
         {lastCommand && (
           <div className="w-full rounded-2xl border border-green-300 bg-green-50 px-4 py-3">
             <p className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-1">
@@ -502,8 +508,8 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
           <p className="text-sm text-orange-600 font-medium text-center">⚠️ {processError}</p>
         )}
 
-        {/* Debug panel */}
-        {processState === "done" && parsedResult && (
+        {/* Debug panel — only shown with ?debug=1 */}
+        {debugMode && processState === "done" && parsedResult && (
           <details className="w-full border border-gray-200 rounded-2xl overflow-hidden">
             <summary className="px-4 py-3 text-sm font-semibold text-gray-600 cursor-pointer hover:bg-gray-50 select-none">
               🔍 Debug: parsed result{" "}

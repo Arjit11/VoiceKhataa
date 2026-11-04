@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase";
 import { buildReply } from "@/lib/reply";
 import { runQuery } from "@/lib/query";
 import { undoLast } from "@/lib/undo";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 const MAX_LENGTH = 500;
 
@@ -64,6 +65,20 @@ async function pickOption(
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
+  // ── Rate limiting ────────────────────────────────────────────────────
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  const rateResult = checkRateLimit(ip);
+  if (!rateResult.ok) {
+    const reply = buildReply({ type: "error" });
+    return NextResponse.json(
+      { ok: false, error: "Too many requests. Please slow down.", reply },
+      {
+        status: 429,
+        headers: { "Retry-After": String(rateResult.retryAfter ?? 60) },
+      }
+    );
+  }
+
   // ── Parse body ───────────────────────────────────────────────────────
   let rawBody: unknown;
   try {
