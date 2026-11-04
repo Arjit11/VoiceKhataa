@@ -220,6 +220,27 @@ export default function Ledger() {
         </span>
       </div>
 
+      {/* ── Totals strip (Phase 6) ───────────────────────────────────── */}
+      {(() => {
+        const debtors = rows.filter((r) => r.balance > 0);
+        const total   = debtors.reduce((s, r) => s + r.balance, 0);
+        return debtors.length > 0 ? (
+          <div className="px-4 py-2 bg-red-50 border-b border-red-100 flex items-center gap-3 text-sm">
+            <span className="text-red-600 font-semibold">
+              Kul udhaar: {fmt(total)}
+            </span>
+            <span className="text-red-400">·</span>
+            <span className="text-red-500">
+              {debtors.length} customer{debtors.length !== 1 ? "s" : ""} with dues
+            </span>
+          </div>
+        ) : (
+          <div className="px-4 py-2 bg-green-50 border-b border-green-100 text-sm text-green-600 font-medium">
+            ✓ Kisi ka udhaar baaki nahi hai
+          </div>
+        );
+      })()}
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

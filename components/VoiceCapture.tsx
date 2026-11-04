@@ -121,6 +121,9 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
   // Phase 5: spoken replies
   const [replyText, setReplyText] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  // Show undo button after a successful entries write
+  const [canUndo, setCanUndo] = useState(false);
+  const [undoLoading, setUndoLoading] = useState(false);
 
   // ------------------------------------------------------------------
   // Reset clarification state
@@ -161,6 +164,7 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
         setParsedResult(null);
         setProcessError(null);
         setReplyText(null);
+        setCanUndo(false);
       }
 
       try {
@@ -218,6 +222,11 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
 
         // Normal success
         if ("parsed" in data) setParsedResult(data.parsed);
+        // Show undo button only after a successful ledger write
+        const wasEntry = "parsed" in data &&
+          (data as { parsed: { intent: string } }).parsed?.intent === "entries" &&
+          !("clarify" in data);
+        setCanUndo(wasEntry);
         clearClarify();
         setProcessState("done");
         if (reply) await speakReply(reply);
@@ -259,6 +268,31 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
     },
     [onTranscript, sendToProcess, pendingState, clearClarify, speakReply]
   );
+
+  // ------------------------------------------------------------------
+  // Undo last entry (Phase 6)
+  // ------------------------------------------------------------------
+  const handleUndo = useCallback(async () => {
+    setUndoLoading(true);
+    try {
+      const res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: "last wala hata do" }),
+      });
+      const data = (await res.json()) as { reply?: string };
+      const reply = data.reply ?? "Last entry hata di.";
+      setReplyText(reply);
+      setCanUndo(false);
+      await speakReply(reply);
+    } catch {
+      const msg = "Kuch gadbad ho gayi. Dobara try kijiye.";
+      setReplyText(msg);
+      await speakReply(msg);
+    } finally {
+      setUndoLoading(false);
+    }
+  }, [speakReply]);
 
   // ------------------------------------------------------------------
   // Speech recognition
@@ -376,6 +410,18 @@ export default function VoiceCapture({ onTranscript }: VoiceCaptureProps) {
                               : "bg-indigo-100 hover:bg-indigo-200 text-indigo-700"}`}>
                 {muted ? "🔇 Muted" : "🔊 Sound on"}
               </button>
+              {/* Undo button — shown after a successful entries write */}
+              {canUndo && (
+                <button
+                  onClick={handleUndo}
+                  disabled={undoLoading}
+                  aria-label="Undo last entry"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100
+                             hover:bg-red-200 text-red-700 text-sm font-medium transition-colors
+                             disabled:opacity-40 disabled:cursor-not-allowed">
+                  {undoLoading ? "…" : "↩ Undo"}
+                </button>
+              )}
             </div>
           </div>
         )}
