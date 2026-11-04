@@ -132,6 +132,9 @@ Compound: "teen sau pachaas" = 350, "do hazaar paanch sau" = 2500.
 ## Sale with partial payment
 - "X ne Y ka saman liya aur Z diye" → kind:"sale", total:Y, paid:Z.
 - "X ne Y rupay ka saman kharida aur Z diye" (Devanagari or Roman) → same pattern.
+- Devanagari example: "शर्मा जी ने 500 रुपए का सामान खरीदा और 400 दिए"
+  → kind:"sale", customer:"Sharma ji", total:500, paid:400
+- The word "diye" / "दिए" after a sale amount = partial payment at time of sale → set paid.
 
 ## Important
 - Do NOT invent data not present in the transcript.
