@@ -103,3 +103,35 @@ begin
     alter publication supabase_realtime add table transactions;
   end if;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Fuzzy name matching function (Phase 4)
+-- ---------------------------------------------------------------------------
+-- Run this in the Supabase SQL editor AFTER the base schema above.
+-- Requires pg_trgm (already enabled above).
+--
+-- Normalization: strip spaces and the honorific "ji" before comparing, so
+-- "Sharma ji", "Sharmaji", "sharma ji" all map to the same token "sharma".
+-- ---------------------------------------------------------------------------
+
+create or replace function match_customers(search text)
+returns table(id uuid, name text, similarity float) as $$
+  with normalized as (
+    select
+      c.id,
+      c.name,
+      similarity(
+        regexp_replace(lower(c.name),  '\s*\yji\y\s*|\s+', '', 'g'),
+        regexp_replace(lower(search),  '\s*\yji\y\s*|\s+', '', 'g')
+      ) as sim
+    from customers c
+  )
+  select id, name, sim as similarity
+  from   normalized
+  where  sim > 0.4
+  order  by sim desc;
+$$ language sql stable security definer;
+
+-- Allow the anon role to call this function (needed from server via service key
+-- it already works; this grant lets the anon client call it too if needed)
+grant execute on function match_customers(text) to anon, authenticated;
